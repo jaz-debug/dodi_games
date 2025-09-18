@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="ar">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>دودي الرسّام — لعبة بسيطة</title>
+  <style>
+    :root{--bg:#f7f7fa;--card:#ffffff;--accent:#6b21a8}
+    body{font-family: Tahoma, Arial, sans-serif;background:var(--bg);margin:0;padding:18px;color:#222}
+    .app{max-width:980px;margin:0 auto}
+    header{display:flex;align-items:center;gap:12px}
+    h1{font-size:20px;margin:0}
+    .row{display:flex;gap:12px;margin-top:12px}
+    .panel{background:var(--card);padding:12px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,0.06);flex:1}
+    #tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    button,img{cursor:pointer}
+    canvas{background:#fff;border:1px solid #ddd;border-radius:8px}
+    #requests{min-height:80px}
+    .request{padding:8px;border-radius:8px;background:#fbfbff;border:1px dashed #ddd;margin-bottom:8px}
+    .stat{font-weight:bold}
+    .small{font-size:13px;color:#555}
+    .center{display:flex;align-items:center;justify-content:center}
+    .museum-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .museum-item{background:#fafafa;border:1px solid #eee;padding:8px;border-radius:6px;text-align:center}
+    footer{margin-top:12px;font-size:13px;color:#666}
+    .btn{background:var(--accent);color:white;border:none;padding:8px 12px;border-radius:8px}
+    .btn.secondary{background:#eee;color:#222}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='48' height='48'><rect rx='8' width='48' height='48' fill='%236b21a8'/><text x='50%' y='55%' font-size='22' fill='white' text-anchor='middle' font-family='Tahoma'>د</text></svg>" alt="logo">
+    <div>
+      <h1>دودي الرسّام — لعبة تعلم الرسم</h1>
+      <div class="small">ارسم لطلبات الزبائن، احصل على تقييم، افتح متاحف واعرض أعمالك.</div>
+    </div>
+  </header>
+
+  <div class="row">
+    <div class="panel" style="flex:0 0 420px">
+      <div id="canvasWrap" class="center">
+        <canvas id="draw" width="400" height="300"></canvas>
+      </div>
+      <div style="margin-top:8px" id="tools">
+        <label>الفرشاة: <input id="size" type="range" min="1" max="30" value="6"></label>
+        <label>اللون: <input id="color" type="color" value="#000000"></label>
+        <button class="btn secondary" id="clear">مسح</button>
+        <button class="btn" id="submit">إرسال للرّسام</button>
+        <button class="btn secondary" id="save">حفظ للمتاحف</button>
+      </div>
+      <div class="small" style="margin-top:6px">ملاحظة: ارسم بالموس (ضغط واستمر). ثم اضغط إرسال لتقييم رسمك.</div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div>نقود: <span class="stat" id="coins">0</span></div>
+          <div class="small">مستوى: <span id="level">1</span></div>
+        </div>
+        <div>
+          <button class="btn" id="newRequest">طلب جديد</button>
+        </div>
+      </div>
+
+      <hr>
+      <div id="requests">
+        <!-- طلب حالي سيظهر هنا -->
+      </div>
+
+      <hr>
+      <div>
+        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between">
+          <div>المتحف: <span id="museumCount">0</span> أعمال محفوظة</div>
+          <div><button class="btn secondary" id="openMuseum">عرض المتحف</button></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="museumPanel" class="panel" style="margin-top:12px;display:none">
+    <h3>متحف دودي</h3>
+    <div class="museum-grid" id="museumGrid"></div>
+  </div>
+
+  <footer>اللعبة مصممة لتجربة بسيطة: ارسم، ارسل، اكسب، و افتح متاحف لعرض أعمالك. إن أردت إضافة ميزات أعمق أقدر أعدّلها.</footer>
+</div>
+
+<script>
+// لعبة بسيطة: رسم، طلبات (أشكال بسيطة)، مقارنة صورة الهدف مع رسم اللاعب، نقاط وحفظ
+const canvas = document.getElementById('draw');
+const ctx = canvas.getContext('2d');
+let drawing=false;
+let brushSize=document.getElementById('size');
+let colorEl=document.getElementById('color');
+let coinsEl=document.getElementById('coins');
+let coins=0; let level=1;
+let currentRequest=null; // object with {id,name,drawFunc}
+let museum=[];
+
+function setUp(){
+  ctx.fillStyle='white'; ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+setUp();
+
+canvas.addEventListener('mousedown',e=>{drawing=true; ctx.beginPath(); ctx.moveTo(...pos(e));});
+canvas.addEventListener('mouseup',e=>{drawing=false});
+canvas.addEventListener('mouseleave',e=>{drawing=false});
+canvas.addEventListener('mousemove',e=>{ if(!drawing) return; let [x,y]=pos(e); ctx.lineWidth=brushSize.value; ctx.lineCap='round'; ctx.strokeStyle=colorEl.value; ctx.lineTo(x,y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x,y); });
+
+function pos(e){const rect=canvas.getBoundingClientRect(); return [e.clientX-rect.left, e.clientY-rect.top];}
+
+document.getElementById('clear').onclick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height); setUp();}
+
+// تعريف طلبات - نرسم شكل الهدف في offscreen canvas
+function createTarget(type){
+  const off = document.createElement('canvas'); off.width=canvas.width; off.height=canvas.height; const octx=off.getContext('2d');
+  octx.fillStyle='white'; octx.fillRect(0,0,off.width,off.height);
+  octx.strokeStyle='black'; octx.lineWidth=10; octx.lineCap='round';
+  octx.fillStyle='black';
+  if(type==='شجرة'){
+    // جذع
+    octx.fillRect(180,180,40,90);
+    // أوراق
+    octx.beginPath(); octx.arc(200,120,70,0,Math.PI*2); octx.fill();
+  } else if(type==='منزل'){
+    octx.fillRect(120,160,160,110);
+    octx.beginPath(); octx.moveTo(100,160); octx.lineTo(200,100); octx.lineTo(300,160); octx.closePath(); octx.fill();
+    octx.fillStyle='white'; octx.fillRect(180,200,40,70);
+  } else if(type==='قطة'){
+    octx.beginPath(); octx.arc(200,160,50,0,Math.PI*2); octx.fill();
+    octx.beginPath(); octx.moveTo(150,130); octx.lineTo(170,110); octx.lineTo(170,130); octx.fill();
+    octx.beginPath(); octx.moveTo(250,130); octx.lineTo(230,110); octx.lineTo(230,130); octx.fill();
+    octx.fillStyle='white'; octx.fillRect(185,170,10,10); octx.fillRect(205,170,10,10);
+  } else if(type==='شمس'){
+    octx.beginPath(); octx.arc(200,120,50,0,Math.PI*2); octx.fill();
+    for(let i=0;i<12;i++){octx.save(); octx.translate(200,120); octx.rotate(i*Math.PI/6); octx.fillRect(45,-4,30,8); octx.restore();}
+  } else if(type==='قلب'){
+    octx.beginPath(); octx.moveTo(200,200); octx.bezierCurveTo(200,180,150,150,170,130); octx.bezierCurveTo(200,100,240,140,240,140); octx.bezierCurveTo(260,150,250,200,200,240); octx.fill();
+  }
+  return off;
+}
+
+const types=['شجرة','منزل','قطة','شمس','قلب'];
+
+function showRequest(){
+  const area=document.getElementById('requests'); area.innerHTML='';
+  if(!currentRequest){ area.innerHTML='<div class="small">لا يوجد طلب حالي. اضغط "طلب جديد" لبدء.</div>'; return; }
+  const div=document.createElement('div'); div.className='request'; div.innerHTML=`<div><strong>طلب:</strong> رسم <em>${currentRequest.type}</em></div><div class="small">صوّر الطلب في اللوحة ثم اضغط إرسال للتقييم.</div>`;
+  area.appendChild(div);
+}
+
+function newRequest(){
+  const t = types[Math.floor(Math.random()*types.length)];
+  currentRequest={type:t, target:createTarget(t)};
+  showRequest();
+}
+
+document.getElementById('newRequest').onclick=newRequest;
+
+// مقارنة بسيطة بين رسم اللاعب والصورة الهدف
+function scoreDrawing(){
+  if(!currentRequest) return null;
+  const target = currentRequest.target;
+  // get image data
+  const userData = ctx.getImageData(0,0,canvas.width,canvas.height).data;
+  const tctx = target.getContext('2d');
+  const targetData = tctx.getImageData(0,0,target.width,target.height).data;
+  // compute ratio of overlapping dark pixels
+  let match=0, targetCount=0, userCount=0;
+  for(let i=0;i<userData.length;i+=4){
+    const ui = (userData[i]+userData[i+1]+userData[i+2]) < 600; // dark pixel
+    const ti = (targetData[i]+targetData[i+1]+targetData[i+2]) < 600;
+    if(ti) targetCount++;
+    if(ui) userCount++;
+    if(ti && ui) match++;
+  }
+  if(targetCount===0) return 0;
+  // precision = match / userCount , recall = match / targetCount
+  const precision = userCount? match/userCount : 0;
+  const recall = match/targetCount;
+  const fscore = (2*precision*recall) / (precision+recall+0.0001);
+  return Math.round(fscore*100);
+}
+
+document.getElementById('submit').onclick=()=>{
+  const s=scoreDrawing();
+  if(s===null){alert('لا يوجد طلب. اضغط طلب جديد.'); return;}
+  const earned = Math.round(s/10) + Math.floor(Math.random()*3);
+  coins += earned; coinsEl.textContent = coins;
+  alert(`تقييم رسمك: ${s}%\nنقود مكتسبة: ${earned}`);
+  // بعد التقييم، إفراغ الطلب تلقائياً
+  currentRequest=null; showRequest();
+}
+
+// حفظ العمل في المتحف
+document.getElementById('save').onclick=()=>{
+  const data = canvas.toDataURL('image/png');
+  museum.push({img:data, date: new Date().toLocaleString()});
+  document.getElementById('museumCount').textContent = museum.length;
+  alert('تم حفظ العمل في المتحف!');
+}
+
+// عرض المتحف
+document.getElementById('openMuseum').onclick=()=>{
+  const panel = document.getElementById('museumPanel');
+  const grid = document.getElementById('museumGrid');
+  if(panel.style.display==='none'){ panel.style.display='block'; }
+  grid.innerHTML='';
+  if(museum.length===0){ grid.innerHTML='<div class="small">لا توجد أعمال محفوظة بعد.</div>'; return; }
+  museum.slice().reverse().forEach(it=>{
+    const d = document.createElement('div'); d.className='museum-item';
+    d.innerHTML = `<img src="${it.img}" style="max-width:100%;border-radius:6px"><div class="small">${it.date}</div>`;
+    grid.appendChild(d);
+  });
+}
+
+// بداية: نضع طلب تلقائي
+newRequest();
+
+</script>
+</body>
+</html>
